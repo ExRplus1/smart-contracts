@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.7.0 <0.9.0;
 
-import "./NFTCreator.sol";
+import "./HederaResponseCodes.sol";
+import "./IHederaTokenService.sol";
+import "./HederaTokenService.sol";
+import "./ExpiryHelper.sol";
+import "./KeyHelper.sol";
 
-contract Surveys {
-    // For the moment the OperatorAccountAddress in Localnet is 0.0.1000
+contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     event Response(bool send, bytes data);
     address operatorAccountAddress;
-    address nftContractAddress;
+    mapping(address => uint) Balance;
 
-    constructor (address _operatorAccountAddress, address _nftContractAddress) {
-        operatorAccountAddress =  _operatorAccountAddress;
-        nftContractAddress = _nftContractAddress;
+    constructor (address _operatorAccountAddresss) {
+        operatorAccountAddress = _operatorAccountAddresss;
     }
 
     // Create hash out of 2 bytes32
@@ -30,20 +32,40 @@ contract Surveys {
     // uint private surveysSize;
 
     Survey[] surveys;
+    address nftAddress;
 
-
-    function setSurvey(bytes32 _surveyHash) public payable returns (bool) {
+    function setSurvey(bytes32 _surveyHash) external payable returns (bool) {
         // pay to create the survey
+
+        Balance[msg.sender] += msg.value;
+
+
         // require(msg.value == _surveyCreationValue, "Insufficient funds for create this survey!");
-        (bool send, bytes memory data )= operatorAccountAddress.call{value: msg.value}("");
-        require(send, "Failed to pay the survey!");
-        emit Response(send, data);
+        // (bool send, bytes memory data )= operatorAccountAddress.call{value: msg.value}("");
+        // require(send, "Failed to pay the survey!");
+        // emit Response(send, data);
     
         //write surveyHash in blockchain
         // surveys[surveysSize+1] = Survey(_surveyHash, msg.sender);
         surveys.push(Survey(_surveyHash, msg.sender));
         // surveysSize++;
     
+      /* 
+        * !!! This function must be called at survey creation and the token saved in context!!!
+        * Then when user will finish the survey will call mintNft with token and surveyHash + answerHash
+        * Tokens can be created with maxSupply equl with surveys number of users
+        */
+
+        //CREATE
+        nftAddress = createNft(
+            string("HashChange"),               // token name
+            string("EXR1"),                     // token symbol
+            string("from surveys"),              // a simple memo
+            int64(10),                          // maxSupply = numbers of users
+            int64(7000000)                     // Expiration: Needs to be between 6999999 and 8000001
+        );
+
+
         return true;
     }
 
@@ -101,55 +123,33 @@ contract Surveys {
     mapping(address => address[]) private userAddressToBadges;
     mapping(address => int64[]) private userAddressToBadgesIds;
 
-    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash) external payable returns (bool)  {
+    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash, bytes[] memory _metadata) external payable returns (bool)  {
+
+        Balance[msg.sender] += msg.value;
 
         // check if survey exists
         // require(surveyExist(_surveyHash), "Survey does not exists!");
 
         // pay to the answer the survey
-        (bool send, bytes memory data)= operatorAccountAddress.call{value: msg.value}("");
-        require(send, "Failed to pay the answers!");
+        // (bool send, bytes memory data)= operatorAccountAddress.call{value: msg.value}("");
+        // require(send, "Failed to pay the answers!");
 
         // add answer hash in blockchain
         answers.push(Answer(_surveyHash, _answerHash, msg.sender));
-        emit Response(send, data); // ???
-
-        /* generate the NFT and send it to the user */
-
-        /* 
-        * !!! This function must be called at survey creation and the token saved in context!!!
-        * Then when user will finish the survey will call mintNft with token and surveyHash + answerHash
-        * Tokens can be created with maxSupply equl with surveys number of users
-        */
-
-        NFTCreator nft = new NFTCreator(operatorAccountAddress);
-
-        //CREATE
-        address token = nft.createNft(
-            string("HashChange"),               // token name
-            string("EXR1"),                     // token symbol
-            string("simple memo"),   // a simple memo
-            int64(2),                          // maxSupply = numbers of users
-            int64(7000000)                     // Expiration: Needs to be between 6999999 and 8000001
-        );
+        // emit Response(send, data); // ???
 
         // MINT
-        // metadata from surveyHash and answerHash
-        bytes[] memory answerHash = new bytes[](2);
-        answerHash[0] = abi.encodePacked(_surveyHash);
-        answerHash[1] = abi.encodePacked(_answerHash);
-
-        int64 serial = nft.mintNft(token, answerHash);
+        int64 serial = this.mintNft(nftAddress, _metadata);
 
         // TRANSFER
-        address receiver = msg.sender;
-        nft.transferNft(token, receiver, serial);
+        this.transferNft(nftAddress, msg.sender, serial);
 
-        userAddressToBadges[msg.sender].push(token);
+        userAddressToBadges[msg.sender].push(nftAddress);
         userAddressToBadgesIds[msg.sender].push(serial);
         return true;
     }
 
+    // check if survey exists
     function surveyExist (bytes32 _survey) private view returns (bool) {
         for (uint i; i< surveys.length;i++){
             if (surveys[i].surveyHash ==_survey )
@@ -184,6 +184,11 @@ contract Surveys {
     }
 
 
+    function getBalance() public view returns (uint) {
+        return address(this).balance;
+    }
+
+
      // get badges of the caller that are not burned  - used for User' Portfolio
     // function getBadgesOfAddress() public view returns (address[] memory) {
     //     address[] memory badges = userAddressToBadges[msg.sender];
@@ -200,4 +205,65 @@ contract Surveys {
     //     }
     //     return filteredBadges;
     // }
+
+   function createNft(
+            string memory name, 
+            string memory symbol, 
+            string memory memo, 
+            int64 maxSupply,  
+            int64 autoRenewPeriod
+        ) public returns (address){
+
+        IHederaTokenService.TokenKey[] memory keys = new IHederaTokenService.TokenKey[](1);
+        keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
+
+        IHederaTokenService.HederaToken memory token;
+        token.name = name;
+        token.symbol = symbol;
+        token.memo = memo;
+        token.treasury = address(this);
+        token.tokenSupplyType = true; // set supply to FINITE
+        token.maxSupply = maxSupply;
+        token.tokenKeys = keys;
+        token.freezeDefault = false;
+        token.expiry = createAutoRenewExpiry(address(this), autoRenewPeriod); // Contract auto-renews the token
+
+        (int responseCode, address createdToken) = HederaTokenService.createNonFungibleToken(token);
+
+        if(responseCode != HederaResponseCodes.SUCCESS){
+            revert("Failed to create non-fungible token");
+        }
+        return createdToken;
+    }
+
+    function mintNft(
+        address token,
+        bytes[] memory metadata
+    ) public returns(int64){
+
+        (int response, , int64[] memory serial) = HederaTokenService.mintToken(token, 0, metadata);
+
+        if(response != HederaResponseCodes.SUCCESS){
+            revert("Failed to mint non-fungible token");
+        }
+
+        return serial[0];
+    }
+
+    function transferNft(
+        address token,
+        address receiver, 
+        int64 serial
+    ) public returns(int){
+
+        int response = HederaTokenService.transferNFT(token, address(this), receiver, serial);
+
+        if(response != HederaResponseCodes.SUCCESS){
+            revert("Failed to transfer non-fungible token");
+        }
+
+        return response;
+    }
+
+
 }
