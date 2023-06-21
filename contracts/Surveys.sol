@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.7.0 <0.9.0;
 
-import "./Badge.sol";
+import "./NFTCreator.sol";
 
 contract Surveys {
     // For the moment the OperatorAccountAddress in Localnet is 0.0.1000
-    address public constant _operatorAccountAddress =  0x00000000000000000000000000000000000003e8;
     event Response(bool send, bytes data);
+    address operatorAccountAddress;
+    address nftContractAddress;
+
+    constructor (address _operatorAccountAddress, address _nftContractAddress) {
+        operatorAccountAddress =  _operatorAccountAddress;
+        nftContractAddress = _nftContractAddress;
+    }
 
     // Create hash out of 2 bytes32
     function createHash(bytes32 _a, bytes32 _b) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(_a, _b));
     }
-
 
     /* Surveys */
 
@@ -30,7 +35,7 @@ contract Surveys {
     function setSurvey(bytes32 _surveyHash) public payable returns (bool) {
         // pay to create the survey
         // require(msg.value == _surveyCreationValue, "Insufficient funds for create this survey!");
-        (bool send, bytes memory data )= _operatorAccountAddress.call{value: msg.value}("");
+        (bool send, bytes memory data )= operatorAccountAddress.call{value: msg.value}("");
         require(send, "Failed to pay the survey!");
         emit Response(send, data);
     
@@ -80,8 +85,6 @@ contract Surveys {
         return values;
     }
 
-
-
     /* Answers */
 
     struct Answer {
@@ -95,33 +98,55 @@ contract Surveys {
 
     Answer[] answers; 
 
-    mapping(address => Badge[]) private userAddressToBadges;
-    mapping(address => uint256[]) private userAddressToBadgesIds;
+    mapping(address => address[]) private userAddressToBadges;
+    mapping(address => int64[]) private userAddressToBadgesIds;
 
-    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash) public  payable returns (bool)  {
+    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash) external payable returns (bool)  {
 
         // check if survey exists
         // require(surveyExist(_surveyHash), "Survey does not exists!");
 
         // pay to the answer the survey
-        (bool send, bytes memory data)= _operatorAccountAddress.call{value: msg.value}("");
-        require(send, "Failed to pay the survey!");
+        (bool send, bytes memory data)= operatorAccountAddress.call{value: msg.value}("");
+        require(send, "Failed to pay the answers!");
 
         // add answer hash in blockchain
         answers.push(Answer(_surveyHash, _answerHash, msg.sender));
+        emit Response(send, data); // ???
 
-        // generate the Badge and send it to the user
-        Badge badge = new Badge();
-        badge.createBadge(
-            msg.sender,
-            uint256(createHash(_surveyHash, _answerHash))
+        /* generate the NFT and send it to the user */
+
+        /* 
+        * !!! This function must be called at survey creation and the token saved in context!!!
+        * Then when user will finish the survey will call mintNft with token and surveyHash + answerHash
+        * Tokens can be created with maxSupply equl with surveys number of users
+        */
+
+        NFTCreator nft = new NFTCreator(operatorAccountAddress);
+
+        //CREATE
+        address token = nft.createNft(
+            string("HashChange"),               // token name
+            string("EXR1"),                     // token symbol
+            string("simple memo"),   // a simple memo
+            int64(2),                          // maxSupply = numbers of users
+            int64(7000000)                     // Expiration: Needs to be between 6999999 and 8000001
         );
 
-        userAddressToBadges[msg.sender].push(badge);
-        userAddressToBadgesIds[msg.sender].push(
-            uint256(createHash(_surveyHash, _answerHash))
-        );
-        emit Response(send, data);
+        // MINT
+        // metadata from surveyHash and answerHash
+        bytes[] memory answerHash = new bytes[](2);
+        answerHash[0] = abi.encodePacked(_surveyHash);
+        answerHash[1] = abi.encodePacked(_answerHash);
+
+        int64 serial = nft.mintNft(token, answerHash);
+
+        // TRANSFER
+        address receiver = msg.sender;
+        nft.transferNft(token, receiver, serial);
+
+        userAddressToBadges[msg.sender].push(token);
+        userAddressToBadgesIds[msg.sender].push(serial);
         return true;
     }
 
@@ -160,19 +185,19 @@ contract Surveys {
 
 
      // get badges of the caller that are not burned  - used for User' Portfolio
-    function getBadgesOfAddress() public view returns (Badge[] memory) {
-        Badge[] memory badges = userAddressToBadges[msg.sender];
-        Badge[] memory filteredBadges = new Badge[](badges.length);
-        uint256 filteredBadgesIndex = 0;
-        for (uint256 i = 0; i < badges.length; i++) {
-            if (
-                badges[i].ownerOf(userAddressToBadgesIds[msg.sender][i]) ==
-                msg.sender
-            ) {
-                filteredBadges[filteredBadgesIndex] = badges[i];
-                filteredBadgesIndex++;
-            }
-        }
-        return filteredBadges;
-    }
+    // function getBadgesOfAddress() public view returns (address[] memory) {
+    //     address[] memory badges = userAddressToBadges[msg.sender];
+    //     address[] memory filteredBadges = new address[](badges.length);
+    //     uint256 filteredBadgesIndex = 0;
+    //     for (uint256 i = 0; i < badges.length; i++) {
+    //         if (
+    //             badges[i].ownerOf(userAddressToBadgesIds[msg.sender][i]) ==
+    //             msg.sender
+    //         ) {
+    //             filteredBadges[filteredBadgesIndex] = badges[i];
+    //             filteredBadgesIndex++;
+    //         }
+    //     }
+    //     return filteredBadges;
+    // }
 }
