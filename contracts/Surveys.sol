@@ -8,13 +8,14 @@ import "./ExpiryHelper.sol";
 import "./KeyHelper.sol";
 
 contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
+    
     event Response(bool send, bytes data);
-    address operatorAccountAddress;
-    mapping(address => uint) Balance;
+    // address operatorAccountAddress;
+    // constructor (address _operatorAccountAddresss) {
+    //     operatorAccountAddress = _operatorAccountAddresss;
+    // }
 
-    constructor (address _operatorAccountAddresss) {
-        operatorAccountAddress = _operatorAccountAddresss;
-    }
+    mapping(address => uint) Balance;
 
     // Create hash out of 2 bytes32
     function createHash(bytes32 _a, bytes32 _b) public pure returns (bytes32) {
@@ -64,7 +65,6 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
             int64(10),                          // maxSupply = numbers of users
             int64(7000000)                     // Expiration: Needs to be between 6999999 and 8000001
         );
-
 
         return true;
     }
@@ -123,7 +123,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     mapping(address => address[]) private userAddressToBadges;
     mapping(address => int64[]) private userAddressToBadgesIds;
 
-    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash, bytes[] memory _metadata) external payable returns (bool)  {
+    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash, bytes[] memory _metadata) external payable returns (int64)  {
 
         Balance[msg.sender] += msg.value;
 
@@ -139,14 +139,11 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         // emit Response(send, data); // ???
 
         // MINT
-        int64 serial = this.mintNft(nftAddress, _metadata);
-
-        // TRANSFER
-        this.transferNft(nftAddress, msg.sender, serial);
-
+        int64 serial = mintNft(nftAddress, _metadata);
+        
         userAddressToBadges[msg.sender].push(nftAddress);
         userAddressToBadgesIds[msg.sender].push(serial);
-        return true;
+        return serial; //we should export the nft address and mint' serial and call the transfer function with its
     }
 
     // check if survey exists
@@ -183,11 +180,9 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return values;
     }
 
-
     function getBalance() public view returns (uint) {
         return address(this).balance;
     }
-
 
      // get badges of the caller that are not burned  - used for User' Portfolio
     // function getBadgesOfAddress() public view returns (address[] memory) {
@@ -212,7 +207,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
             string memory memo, 
             int64 maxSupply,  
             int64 autoRenewPeriod
-        ) public returns (address){
+        ) public payable returns (address){
 
         IHederaTokenService.TokenKey[] memory keys = new IHederaTokenService.TokenKey[](1);
         keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
@@ -239,31 +234,30 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     function mintNft(
         address token,
         bytes[] memory metadata
-    ) public returns(int64){
-
+    ) public payable returns(int64){
         (int response, , int64[] memory serial) = HederaTokenService.mintToken(token, 0, metadata);
-
         if(response != HederaResponseCodes.SUCCESS){
             revert("Failed to mint non-fungible token");
         }
-
         return serial[0];
     }
 
     function transferNft(
-        address token,
-        address receiver, 
-        int64 serial
-    ) public returns(int){
-
-        int response = HederaTokenService.transferNFT(token, address(this), receiver, serial);
-
+        address _token,
+        int64 _serial
+    ) public payable returns(int){
+        int response = HederaTokenService.transferNFT(_token, address(this), address(msg.sender), _serial);
         if(response != HederaResponseCodes.SUCCESS){
             revert("Failed to transfer non-fungible token");
         }
-
         return response;
     }
 
-
+     function approveNft(address _token, uint256 _serialNumber) public returns (int responseCode) {
+        responseCode = HederaTokenService.approveNFT(_token, msg.sender, _serialNumber);
+        if (responseCode != HederaResponseCodes.SUCCESS) {
+            revert ("Failed to approve non-fungibile token");
+        }
+        return responseCode;
+    }
 }
