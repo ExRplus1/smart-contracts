@@ -101,7 +101,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
 
     Answer[] answers; 
 
-    function getNftAddressForSurveyHash(bytes32 surveyHash) private view returns (address) {
+    function getNftAddressForSurveyHash(bytes32 surveyHash) public view returns (address) {
         address nftAddress;
         for (uint i = 0; i < surveys.length; i++) {
                 if(surveys[i].surveyHash == surveyHash) {
@@ -142,8 +142,13 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return false;
     }
 
-    function getAnswer(uint i) public view returns (Answer memory) {
-        return answers[i];
+    function getAnswerForSurvey(bytes32 surveyHash) public view returns (Answer memory) {
+        Answer[] memory values = new Answer[](answers.length);
+        for(uint i = 0; i < answers.length; i++) {
+            if(answers[i].userAddress == msg.sender && answers[i].surveyHash == surveyHash) {
+                return answers[i];
+            }
+        }
     }
 
     function getAnswers() public view returns (Answer[] memory) {
