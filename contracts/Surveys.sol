@@ -96,12 +96,10 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         bytes32 surveyHash;
         bytes32 answerHash;
         address userAddress;
+        int64 nftSerial;
     }
 
     Answer[] answers; 
-
-    mapping(address => address[]) private userAddressToBadges;
-    mapping(address => int64[]) private userAddressToBadgesIds;
 
     function getNftAddressForSurveyHash(bytes32 surveyHash) private view returns (address) {
         address nftAddress;
@@ -113,34 +111,26 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return nftAddress;
     }
 
-    function setAnswer(bytes32 _surveyHash, bytes32 _answerHash, bytes[] memory _metadata) external payable returns (int64)  {
+    function setAnswer(bytes32 surveyHash, bytes32 answerHash, bytes[] memory metadata) external payable returns (bool)  {
 
         Balance[msg.sender] += msg.value;
 
-        address nftAddress = getNftAddressForSurveyHash(_surveyHash);
         // check if survey exists
         // require(surveyExist(_surveyHash), "Survey does not exists!");
 
-        // pay to the answer the survey
-        // (bool send, bytes memory data)= operatorAccountAddress.call{value: msg.value}("");
-        // require(send, "Failed to pay the answers!");
-
-        answers.push(Answer(_surveyHash, _answerHash, msg.sender));
+        address nftAddress = getNftAddressForSurveyHash(surveyHash);
 
         // MINT
-        int64 serial = mintNft(nftAddress, _metadata);
+        int64 serial = mintNft(nftAddress, metadata);
 
-        // TRANSFER
-        uint serial256 = uint256(uint64(serial));
-        IERC721(nftAddress).approve(msg.sender, serial256);
-        IERC721(nftAddress).transferFrom(address(this), msg.sender, serial256);
+        // TRANSFER - not working for the moment 06.2023
+        // uint serial256 = uint256(uint64(serial));
+        // IERC721(nftAddress).approve(msg.sender, serial256);
+        // IERC721(nftAddress).transferFrom(address(this), msg.sender, serial256);
 
-        userAddressToBadges[msg.sender].push(nftAddress);
-        userAddressToBadgesIds[msg.sender].push(serial);
+        answers.push(Answer(surveyHash, answerHash, msg.sender, serial));
 
-        // emit Response(send, data);
-
-        return serial; //we should export the nft address and mint' serial and call the transfer function with its
+        return true;
     }
 
     // check if survey exists
@@ -157,11 +147,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     }
 
     function getAnswers() public view returns (Answer[] memory) {
-        Answer[] memory ans = new Answer[](answers.length);
-        for(uint i = 0; i < answers.length; i++) {
-            ans[i] = answers[i];
-        }
-        return ans;
+       return answers;
     }
  
     function getUserAnswers() public view returns (Answer[] memory) {
@@ -181,22 +167,6 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return address(this).balance;
     }
 
-     // get badges of the caller that are not burned  - used for User' Portfolio
-    // function getBadgesOfAddress() public view returns (address[] memory) {
-    //     address[] memory badges = userAddressToBadges[msg.sender];
-    //     address[] memory filteredBadges = new address[](badges.length);
-    //     uint256 filteredBadgesIndex = 0;
-    //     for (uint256 i = 0; i < badges.length; i++) {
-    //         if (
-    //             badges[i].ownerOf(userAddressToBadgesIds[msg.sender][i]) ==
-    //             msg.sender
-    //         ) {
-    //             filteredBadges[filteredBadgesIndex] = badges[i];
-    //             filteredBadgesIndex++;
-    //         }
-    //     }
-    //     return filteredBadges;
-    // }
 
    function createNft(
             string memory name, 
@@ -245,27 +215,25 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return serial[0];
     }
 
-    // function transferNft(
-    //     address _token,
-    //     int64 _serial
-    // ) public payable returns(int){
-      
-    //     int response = HederaTokenService.transferNFT(_token, address(this), address(msg.sender), _serial);
-    //     if(response != HederaResponseCodes.SUCCESS){
-    //         revert("Failed to transfer non-fungible token");
-    //     }
-    //     return response;
-    // }
-
-     function approveNft(
-        address _token, 
-        uint256 _serialNumber
-    ) public returns (int responseCode) {
-          HederaTokenService.associateToken(
+    function transferNft(
+        address _token,
+        int64 _serial
+    ) public payable returns(int){
+        HederaTokenService.associateToken(
             address(msg.sender),
             _token
         );
+        int response = HederaTokenService.transferNFT(_token, address(this), address(msg.sender), _serial);
+        if(response != HederaResponseCodes.SUCCESS){
+            revert("Failed to transfer non-fungible token");
+        }
+        return response;
+    }
 
+    function approveNft(
+        address _token, 
+        uint256 _serialNumber
+    ) public returns (int responseCode) {
         responseCode = HederaTokenService.approveNFT(_token, msg.sender, _serialNumber);
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert ("Failed to approve non-fungibile token");
@@ -274,20 +242,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     }
 
 
-/// play ground
-
-    // function approveNft(address token, uint256 tokenId) external payable {
-    //     IERC721(token).approve(msg.sender, tokenId);
-    // }
-
-    //The call will be executed by the contract itself, so the contract address has to be the owner of `tokenId`
-    function transferNft(address token, uint256 tokenId) external payable {
-
-        IERC721(token).transferFrom(address(this), msg.sender, tokenId);
-       
-        //    ERROR_DECODING_PRECOMPILE_INPUT
-        // IERC721(token).safeTransferFrom(address(this), msg.sender, tokenId);
-    }
+    // play ground
 
     function  getApprovedNft(address token, uint256 tokenId) external view returns (address) {
         return IERC721(token).getApproved(tokenId);
@@ -308,21 +263,5 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     function tokenURIOfNft(address token, uint256 tokenId) public view returns (string memory) {
         return IERC721Metadata(token).tokenURI(tokenId);
     }
-
-    /** MSG:: PRECOMPILE ERROR  */
-    /* ================== */
-
-   // The `to` address will receive approval by msg.sender
-    // function delegateApproveNft(address token, uint256 tokenId) external payable {
-    //     address(IERC721(token)).delegatecall(abi.encodeWithSignature("approve(address,uint256)", operatorAccountAddress, tokenId));
-    // }
-    
-
-   // The call will be executed by the msg.sender address
-    // function delegateTransferFromNft(address token, uint256 tokenId) external payable {
-    //     address(IERC721(token)).delegatecall(abi.encodeWithSignature("transferFrom(address,address,uint256)", address(this), operatorAccountAddress, tokenId));
-    // }
-
-
 
 }
