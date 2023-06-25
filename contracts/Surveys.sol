@@ -44,7 +44,7 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
 
     Survey[] surveys;
 
-    function setSurvey(bytes32 _surveyHash) external payable returns (bool) {
+    function setSurvey(bytes32 surveyHash, int64 nrOfTokens) external payable returns (bool) {
         Balance[msg.sender] += msg.value;
         // require(msg.value == _surveyCreationValue, "Insufficient funds for create this survey!");
 
@@ -52,13 +52,13 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         // require(send, "Failed to pay the survey!");
     
         surveys.push(Survey(
-            _surveyHash, 
+            surveyHash, 
             msg.sender,
             createNft(
                   string("HashChange"),           // token name
                   string("EXR1"),                 // token symbol
                   string("from surveys"),         // a simple memo
-                  int64(10),                      // maxSupply = numbers of users
+                  nrOfTokens,                     // maxSupply = numbers of users
                   int64(7000000)                  // Expiration: Needs to be between 6999999 and 8000001
                 )
             ));
