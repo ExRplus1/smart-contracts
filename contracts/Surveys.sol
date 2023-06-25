@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.7.0 <0.9.0;
+pragma experimental ABIEncoderV2;
 
 import "./HederaResponseCodes.sol";
 import "./IHederaTokenService.sol";
@@ -10,6 +11,13 @@ import "./KeyHelper.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/IERC721Enumerable.sol";
+
+
+interface IHRC {
+    function associate() external returns (int64 responseCode);
+    function dissociate() external returns (int64 responseCode);
+    function isAssociated() external view returns (bool);
+}
 
 contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
     
@@ -142,13 +150,16 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         return false;
     }
 
-    function getAnswerForSurvey(bytes32 surveyHash) public view returns (Answer memory) {
+    function getAnswerForSurvey(bytes32 surveyHash) public view returns (Answer[] memory) {
         Answer[] memory values = new Answer[](answers.length);
+        uint j;
         for(uint i = 0; i < answers.length; i++) {
             if(answers[i].userAddress == msg.sender && answers[i].surveyHash == surveyHash) {
-                return answers[i];
+                values[j] = answers[i];
+                j++;
             }
         }
+        return values;
     }
 
     function getAnswers() public view returns (Answer[] memory) {
@@ -217,17 +228,23 @@ contract Surveys is ExpiryHelper, KeyHelper, HederaTokenService {
         if(response != HederaResponseCodes.SUCCESS){
             revert("Failed to mint non-fungible token");
         }
+
         return serial[0];
     }
+
+    function associate(address token) public payable returns (int responseCode) {
+        (bool success, bytes memory result) = address(token).delegatecall(
+            abi.encodeWithSignature('associate()'));
+        (responseCode) = success
+        ? abi.decode(result, (int32))
+        : (HederaResponseCodes.UNKNOWN);
+
+    } 
 
     function transferNft(
         address _token,
         int64 _serial
     ) public payable returns(int){
-        HederaTokenService.associateToken(
-            address(msg.sender),
-            _token
-        );
         int response = HederaTokenService.transferNFT(_token, address(this), address(msg.sender), _serial);
         if(response != HederaResponseCodes.SUCCESS){
             revert("Failed to transfer non-fungible token");
